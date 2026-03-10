@@ -40,6 +40,7 @@ async def stream_generator(payload: dict):
     
     # Pastikan request diset agar meminta streaming dari llama.cpp
     payload["stream"] = True
+    payload["model"] = "qwen-0.5b"
 
     # Gunakan httpx AsyncClient agar tidak memblokir server FastAPI
     async with httpx.AsyncClient(timeout=timeout_config) as client:
@@ -77,4 +78,5 @@ async def chat_endpoint(request: ChatRequest):
     return StreamingResponse(stream_generator(payload), media_type="text/event-stream")
 
 # Catatan Tambahan: Server ini dijalankan dengan Uvicorn, misal:
+
 # uvicorn main:app --host 0.0.0.0 --port 10000
