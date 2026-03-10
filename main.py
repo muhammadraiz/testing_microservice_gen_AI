@@ -28,53 +28,47 @@ class ChatRequest(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 512
 
-# 3 & 4. MENGATASI EFEK MESIN KETIK (STREAMING) & COLD START
+# 3. FUNGSI STREAMING KE HUGGING FACE
 async def stream_generator(payload: dict):
-    # Mengatasi Cold Start:
     timeout_config = httpx.Timeout(300.0, connect=60.0)
     
-    # --- FIX ERROR 400 BAD REQUEST ---
-    # Standar OpenAI mewajibkan parameter 'model' dan 'stream'.
+    # Standar OpenAI parameter
     payload["stream"] = True
-    # Ubah nama model persis sesuai path file yang di-download di start.sh
-    payload["model"] = "./model/qwen1_5-0_5b-chat-q4_k_m.gguf" 
-    # ---------------------------------
+    # Hapus payload model agar llama.cpp menggunakan model defaultnya otomatis
+    if "model" in payload:
+        del payload["model"]
 
-    # Gunakan httpx AsyncClient agar tidak memblokir server FastAPI
+    # Tambahkan User-Agent standar agar gerbang Hugging Face tidak memblokir request kita
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     async with httpx.AsyncClient(timeout=timeout_config) as client:
         try:
-            # Melakukan koneksi streaming (Server-Sent Events) ke server LLM siswa di Hugging Face
-            async with client.stream("POST", LLM_API_URL, json=payload) as response:
+            async with client.stream("POST", LLM_API_URL, json=payload, headers=headers) as response:
                 
-                # Jika ada error dari Hugging Face (misal limit atau url salah)
                 if response.status_code != 200:
-                    await response.aread() # Membaca detail pesan error asli dari Hugging Face
-                    error_detail = response.text
-                    yield f"data: {json.dumps({'error': f'HF Server Error (Code {response.status_code}): {error_detail}'})}\n\n"
+                    await response.aread() 
+                    error_detail = response.text.strip()
+                    # Menambahkan pelacak URL untuk mendeteksi salah ketik
+                    yield f"data: {json.dumps({'error': f'HF Error ({response.status_code}) di URL {LLM_API_URL}. Info: {error_detail}'})}\n\n"
                     return
 
-                # Membaca token demi token secara real-time dan meneruskannya ke Frontend
                 async for chunk in response.aiter_lines():
                     if chunk:
                         yield f"{chunk}\n\n"
                         
         except httpx.ReadTimeout:
-             yield f"data: {json.dumps({'error': 'Request Timeout. Hugging Face Space mungkin butuh waktu lebih lama untuk bangun dari mode Sleep.'})}\n\n"
+             yield f"data: {json.dumps({'error': 'Request Timeout. Hugging Face sedang loading model.'})}\n\n"
         except Exception as exc:
              yield f"data: {json.dumps({'error': f'Koneksi Gagal: {str(exc)}'})}\n\n"
 
 @app.get("/")
 async def root():
-    return {"message": "Server GenAI Proxy Berjalan Normal! Silakan tembak endpoint /api/chat dari Frontend Anda."}
+    return {"message": "Server GenAI Proxy Berjalan Normal! Pastikan LLM_API_URL di Environment sudah benar."}
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
-    """
-    Endpoint ini akan di-hit oleh antarmuka Frontend.
-    Ia menerima JSON riwayat chat, lalu membukakan terowongan streaming ke Hugging Face.
-    """
-    # Ubah format request dari Pydantic menjadi Dictionary (JSON)
     payload = request.model_dump()
-    
-    # Kembalikan response berupa Server-Sent Events (SSE) stream
     return StreamingResponse(stream_generator(payload), media_type="text/event-stream")
