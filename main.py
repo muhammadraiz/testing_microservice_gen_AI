@@ -34,13 +34,13 @@ async def stream_generator(payload: dict):
     
     # Standar OpenAI parameter
     payload["stream"] = True
-    # Hapus payload model agar llama.cpp menggunakan model defaultnya otomatis
-    if "model" in payload:
-        del payload["model"]
+    # WAJIB ADA: Server akan menolak jika parameter model kosong
+    payload["model"] = "qwen"
 
-    # Tambahkan User-Agent standar agar gerbang Hugging Face tidak memblokir request kita
+    # Tambahkan User-Agent standar dan Accept Header khusus Streaming agar tidak diblokir proxy HF
     headers = {
         "Content-Type": "application/json",
+        "Accept": "text/event-stream",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
